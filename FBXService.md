@@ -1,7 +1,7 @@
 # FBXService — System Document
 
 ## What It Is
-HTTP service that accepts a binary `.fbx` file upload and returns JSON inspection data — nodes, meshes, materials, textures, settings, coordinate system. Used by other local tools and services that need to read FBX data without a Unity or DCC dependency.
+HTTP service that accepts a binary `.fbx` file upload or a public URL pointing to an FBX file, and returns JSON inspection data — nodes, meshes, materials, textures, settings, coordinate system. Used by other local tools and services that need to read FBX data without a Unity or DCC dependency.
 
 ---
 
@@ -57,7 +57,8 @@ HTTP service that accepts a binary `.fbx` file upload and returns JSON inspectio
 
 ## API
 
-All inspect endpoints: `POST` with `multipart/form-data`, field name `file`.
+### Upload endpoint — POST with file
+`multipart/form-data`, field name `file`.
 
 | Endpoint | Returns |
 |----------|---------|
@@ -75,6 +76,18 @@ All inspect endpoints: `POST` with `multipart/form-data`, field name `file`.
 | `POST /inspect/textures` | Texture references + embedded data info |
 | `POST /inspect/tree` | Raw FBX node tree (6 levels deep) |
 | `POST /inspect/animations` | Stub — not yet implemented |
+
+### URL endpoint — GET with ?url=
+Accepts any public `http://` or `https://` URL (including public GCS signed URLs). Service downloads the file then inspects it. Same commands and flags as the upload endpoint.
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /inspect-url?url=https://...` | Full dump (all) |
+| `GET /inspect-url/meshes?url=https://...` | Meshes only |
+| `GET /inspect-url/mesh/Cube?url=https://...&raw` | Single mesh with vertex arrays |
+| `GET /inspect-url/material/Mat?url=https://...` | Single material |
+
+Download timeout: 60 seconds.
 
 Query flags: `?raw` (vertex arrays), `?verbose` (stack traces in errors)
 
@@ -99,4 +112,5 @@ git add -A ; git commit -m "msg" ; git push   # triggers auto Cloud Build deploy
 - **FBX parser is pure C#** — no Unity, no native libs. Handles binary FBX v7100–v7700. ASCII FBX returns a `ParseError`.
 - **Unity types replaced** — `Vector2/3` and `Color` are local `record struct` types (`Vec2`, `Vec3`, `Col`).
 - **All source in one file** — `FBXService.cs` contains the web host setup, all HTTP endpoints, FBX parser, scene extractor, and command dispatch.
+- **URL endpoint uses `IHttpClientFactory`** — registered via `builder.Services.AddHttpClient()`. Downloads the FBX into memory then parses. Only works with public or signed URLs — no GCP auth.
 - **Animation extraction not implemented** — the `animations` endpoint returns a stub. Use `tree` command to inspect raw animation nodes.

@@ -35,6 +35,7 @@ builder.WebHost.ConfigureKestrel(k =>
     k.Limits.MaxRequestBodySize = 512L * 1024 * 1024;
 });
 
+builder.Services.AddHttpClient();
 var app = builder.Build();
 
 // ── probes ────────────────────────────────────────────────────────────────────
@@ -104,6 +105,57 @@ app.MapPost("/inspect/{command?}/{target?}", async (HttpContext ctx, string? com
         return Results.Json(FbxErrors.Make(FbxErrorType.CommandError,
             $"Command '{cmd}' threw: {ex.Message}", $"Commands.{cmd}", ex, verbose), statusCode: 500);
     }
+
+    return Results.Json(result);
+});
+
+
+// -- inspect by URL -----------------------------------------------------------
+// GET /inspect-url/{command?}/{target?}?url=https://...&raw&verbose
+
+app.MapGet("/inspect-url/{command?}/{target?}", async (HttpContext ctx, IHttpClientFactory factory, string? command, string? target) =>
+{
+    var fileUrl = ctx.Request.Query["url"].FirstOrDefault();
+    if (string.IsNullOrEmpty(fileUrl))
+        return Results.BadRequest(SimpleError("Missing ?url= query parameter."));
+    if (!Uri.TryCreate(fileUrl, UriKind.Absolute, out var uri) ||
+        (uri.Scheme != "http" && uri.Scheme != "https"))
+        return Results.BadRequest(SimpleError("?url= must be an http:// or https:// URL."));
+
+    bool   raw     = ctx.Request.Query.ContainsKey("raw");
+    bool   verbose = ctx.Request.Query.ContainsKey("verbose");
+    string cmd     = (command ?? "all").ToLowerInvariant();
+
+    byte[] data;
+    try
+    {
+        var client = factory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(60);
+        data = await client.GetByteArrayAsync(uri);
+    }
+    catch (Exception ex)
+    { return Results.Json(FbxErrors.Make(FbxErrorType.FileReadError, $"Failed to download URL: {ex.Message}", "Download", ex, verbose), statusCode: 502); }
+
+    FbxReadSession session;
+    try   { session = FbxReadSession.Parse(uri.Segments.Last(), data); }
+    catch (NotSupportedException ex)
+    { return Results.Json(FbxErrors.Make(FbxErrorType.ParseError, ex.Message, "FbxParser", ex, verbose), statusCode: 422); }
+    catch (InvalidDataException ex)
+    { return Results.Json(FbxErrors.Make(FbxErrorType.ParseError, $"FBX parse error: {ex.Message}", "FbxParser", ex, verbose), statusCode: 422); }
+    catch (Exception ex)
+    { return Results.Json(FbxErrors.Make(FbxErrorType.InternalError, $"Parser crash: {ex.Message}", "FbxParser", ex, verbose), statusCode: 500); }
+
+    object? result;
+    try
+    {
+        result = FBXReadCommands.Dispatch(cmd, session, target, raw, verbose);
+        if (result is null)
+            return Results.Json(FbxErrors.Make(FbxErrorType.BadArguments,
+                $"Unknown command '{cmd}'. Valid: all list tree settings nodes node meshes mesh materials material textures animations",
+                "Dispatch", null, verbose), statusCode: 400);
+    }
+    catch (Exception ex)
+    { return Results.Json(FbxErrors.Make(FbxErrorType.CommandError, $"Command '{cmd}' threw: {ex.Message}", $"Commands.{cmd}", ex, verbose), statusCode: 500); }
 
     return Results.Json(result);
 });
@@ -898,3 +950,4 @@ internal static class FbxSceneExtractor
         return s.Trim();
     }
 }
+
