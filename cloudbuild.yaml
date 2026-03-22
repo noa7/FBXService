@@ -1,0 +1,43 @@
+steps:
+  # Build the container image
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - gcr.io/$PROJECT_ID/fbx-service:$SHORT_SHA
+      - -t
+      - gcr.io/$PROJECT_ID/fbx-service:latest
+      - .
+
+  # Push both tags
+  - name: gcr.io/cloud-builders/docker
+    args: [push, gcr.io/$PROJECT_ID/fbx-service:$SHORT_SHA]
+
+  - name: gcr.io/cloud-builders/docker
+    args: [push, gcr.io/$PROJECT_ID/fbx-service:latest]
+
+  # Deploy to Cloud Run
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - fbx-service
+      - --image=gcr.io/$PROJECT_ID/fbx-service:$SHORT_SHA
+      - --region=europe-west1
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=512Mi
+      - --cpu=1
+      - --concurrency=80
+      - --timeout=60s
+      - --min-instances=0
+      - --max-instances=10
+      - --port=8080
+
+images:
+  - gcr.io/$PROJECT_ID/fbx-service:$SHORT_SHA
+  - gcr.io/$PROJECT_ID/fbx-service:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
